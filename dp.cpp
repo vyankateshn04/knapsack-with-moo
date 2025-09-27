@@ -32,6 +32,17 @@ int solve_using_dp() {
 }
 
 int solve_using_moo() {
+    // step 1: Initialize the population
+    // 10 for ex
+    int initial_population;
+    cout << "enter the intial population:\n";
+    cin >> initial_population;
+
+    // we will use string of size total trasaction for each individual
+    // if the bit is set for that particular entry then it is present in the answer set
+    // ex: string "10010" represent we will take transaction 0 and 3.
+
+    // generate initial_population no. of string
 
 }
 
