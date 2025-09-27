@@ -150,7 +150,7 @@ Individual selection(const std::vector<Individual>& population) {
 }
 
 // Single-point crossover
-std::pair<Individual, Individual> crossover(const Individual& p1, const Individual& p2) {
+std::pair<Individual, Individual> crossover(const Individual& p1, const Individual& p2, double crossover_rate) {
     Individual c1 = p1, c2 = p2;
     int crossover_point = rand() % p1.included_transactions.size();
     for (int i = crossover_point; i < p1.included_transactions.size(); ++i) {
@@ -172,8 +172,8 @@ int main() {
     // 1. --- PROBLEM SETUP ---
     srand(time(0));
     int population_size = 50;
-    int generations = 200;
-    double mutation_rate = 0.02;
+    int generations = 1000;
+    double mutation_rate = 0.05, crossover_rate = 0.95;
 
     ifstream inputFile("input_7.txt");
     if (!inputFile.is_open()) {
@@ -212,7 +212,7 @@ int main() {
         while (offspring.size() < population_size) {
             Individual p1 = selection(population);
             Individual p2 = selection(population);
-            auto children = crossover(p1, p2);
+            auto children = crossover(p1, p2,crossover_rate);
             mutate(children.first, mutation_rate);
             mutate(children.second, mutation_rate);
             calculate_objectives(children.first, all_transactions);
