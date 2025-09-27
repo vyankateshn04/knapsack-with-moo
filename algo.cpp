@@ -11,6 +11,7 @@ where price is eq to `execution time` and pages is eq to `gas fees`
 
 #include <iostream>
 #include <vector>
+#include <fstream>
 using namespace std;
 
 #define int long long
@@ -27,7 +28,7 @@ int solve_using_dp() {
         }
     }
  
-    cout << dp[mx_exec_time] << endl;
+    return dp[mx_exec_time];
 }
 
 int solve_using_moo() {
@@ -35,13 +36,23 @@ int solve_using_moo() {
 }
 
 int32_t main() {
-    cin >> total_transactions >> mx_exec_time;
+    ifstream inputFile("input_7.txt");
+    if (!inputFile.is_open()) {
+        cerr << "Could not open the file!" << endl;
+        return 1;
+    }
+    inputFile >> total_transactions >> mx_exec_time;
     
     exec_time.resize(total_transactions);
     gas_fees.resize(total_transactions);
     
-    for(auto&e: exec_time) cin >> e;
-    for(auto&e: gas_fees) cin >> e;
+    for(auto&e: exec_time) inputFile >> e;
+    for(auto&e: gas_fees) inputFile >> e;
     
     int dp_ans = solve_using_dp();
+
+    ofstream outputFile("output_7.txt");
+    outputFile << dp_ans << endl;
+    outputFile.close();
+    return 0;
 }
