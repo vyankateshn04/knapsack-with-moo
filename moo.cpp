@@ -7,7 +7,6 @@
 
 using namespace std;
 
-// Represents a single transaction
 struct Transaction {
     int id;
     double exec_time;
@@ -17,11 +16,9 @@ struct Transaction {
 struct Individual {
     std::vector<bool> included_transactions;
 
-    // Objective values
     double total_exec_time;
     double negative_total_gas_fee; // We minimize this to maximize the fee
 
-    // --- NEW FIELD ---
     // Stores how much the exec_time exceeds the maximum allowed time.
     // This will be 0 if the solution is feasible.
     double constraint_violation = 0.0; 
@@ -31,13 +28,10 @@ struct Individual {
     double crowding_distance = 0.0;
 };
 
-// --- HELPER AND OBJECTIVE FUNCTIONS ---
-
-// We now pass the constraint value to this function
 void calculate_objectives(Individual& individual, const std::vector<Transaction>& all_transactions, double mx_exec_time) {
     individual.total_exec_time = 0.0;
     double total_gas_fee = 0.0;
-    individual.constraint_violation = 0.0; // Reset violation
+    individual.constraint_violation = 0.0;
 
     for (size_t i = 0; i < all_transactions.size(); ++i) {
         if (individual.included_transactions[i]) {
@@ -48,14 +42,12 @@ void calculate_objectives(Individual& individual, const std::vector<Transaction>
     // Store the negative gas fee for minimization
     individual.negative_total_gas_fee = -total_gas_fee;
 
-    // --- NEW LOGIC ---
     // Check if the constraint is violated and calculate by how much
     if (individual.total_exec_time > mx_exec_time) {
         individual.constraint_violation = individual.total_exec_time - mx_exec_time;
     }
 }
 
-// --- REWRITTEN FUNCTION ---
 // Check for dominance using the constrained dominance principle
 bool dominates(const Individual& ind1, const Individual& ind2) {
     bool ind1_is_feasible = (ind1.constraint_violation == 0);
@@ -80,8 +72,6 @@ bool dominates(const Individual& ind1, const Individual& ind2) {
     bool not_worse_in_any = (ind1.total_exec_time <= ind2.total_exec_time) && (ind1.negative_total_gas_fee <= ind2.negative_total_gas_fee);
     return better_in_one && not_worse_in_any;
 }
-
-// --- NSGA-II SPECIFIC FUNCTIONS ---
 
 // Performs the non-dominated sort on the population
 // Returns a vector of fronts, where each front is a vector of indices
@@ -163,11 +153,8 @@ void calculate_crowding_distance(std::vector<Individual>& front) {
     }
 }
 
-// --- GENETIC OPERATORS ---
-
 // Tournament Selection based on rank and crowding distance
 Individual selection(const std::vector<Individual>& population) {
-    // Simple tournament selection
     int i = rand() % population.size();
     int j = rand() % population.size();
     const Individual& ind1 = population[i];
@@ -201,7 +188,6 @@ void mutate(Individual& individual, double mutation_rate) {
 }
 
 int main() {
-    // 1. --- PROBLEM SETUP ---
     srand(time(0));
     int population_size = 100;
     int generations = 200;
@@ -221,13 +207,11 @@ int main() {
     for(auto&e: exec_time) inputFile >> e;
     for(auto&e: gas_fees) inputFile >> e;
 
-    // Create some random transactions for demonstration
     std::vector<Transaction> all_transactions;
     for (int i = 0; i < total_transactions; ++i) {
         all_transactions.push_back({i, (double)exec_time[i], (double)(gas_fees[i])});
     }
 
-    // 2. --- INITIALIZATION ---
     std::vector<Individual> population(population_size);
     for (auto& ind : population) {
         ind.included_transactions.resize(total_transactions);
@@ -237,9 +221,7 @@ int main() {
         calculate_objectives(ind, all_transactions, mx_exec_time);
     }
 
-    // 3. --- GENERATIONAL LOOP ---
     for (int gen = 0; gen < generations; ++gen) {
-        // Create Offspring
         std::vector<Individual> offspring;
         while (offspring.size() < population_size) {
             Individual p1 = selection(population);
@@ -253,11 +235,9 @@ int main() {
             offspring.push_back(children.second);
         }
         
-        // Combine parent and offspring
         std::vector<Individual> combined_pop = population;
         combined_pop.insert(combined_pop.end(), offspring.begin(), offspring.end());
 
-        // Sort the combined population
         auto fronts = non_dominated_sort(combined_pop);
         
         std::vector<Individual> next_population;
@@ -280,11 +260,8 @@ int main() {
             }
         }
         population = next_population;
-        
-        // std::cout << "Generation " << gen + 1 << " complete." << std::endl;
     }
 
-    // 4. --- OUTPUT THE FINAL PARETO FRONT ---
     auto final_fronts = non_dominated_sort(population);
     std::cout << "\n--- Final Pareto Front (Best Trade-offs) ---\n";
     int ans = 0, cur_exec_time = 0;
@@ -294,8 +271,6 @@ int main() {
             ans = -sol.negative_total_gas_fee;
             cur_exec_time = sol.total_exec_time;
         }
-        // std::cout << "Solution: Time = " << sol.total_exec_time
-        //           << ", Gas Fee = " << -sol.negative_total_gas_fee << std::endl;
     }
 
     std::cout << "Solution: Time = " << cur_exec_time
