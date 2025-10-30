@@ -14,13 +14,17 @@ struct Transaction {
     double gas_fee;
 };
 
-// Represents a potential solution (a subset of transactions)
 struct Individual {
-    std::vector<bool> included_transactions; // Binary vector
+    std::vector<bool> included_transactions;
 
     // Objective values
     double total_exec_time;
     double negative_total_gas_fee; // We minimize this to maximize the fee
+
+    // --- NEW FIELD ---
+    // Stores how much the exec_time exceeds the maximum allowed time.
+    // This will be 0 if the solution is feasible.
+    double constraint_violation = 0.0; 
 
     // NSGA-II specific fields
     int rank = 0; // The non-domination front number
@@ -29,10 +33,11 @@ struct Individual {
 
 // --- HELPER AND OBJECTIVE FUNCTIONS ---
 
-// Calculates the two objective values for an individual
-void calculate_objectives(Individual& individual, const std::vector<Transaction>& all_transactions) {
+// We now pass the constraint value to this function
+void calculate_objectives(Individual& individual, const std::vector<Transaction>& all_transactions, double mx_exec_time) {
     individual.total_exec_time = 0.0;
     double total_gas_fee = 0.0;
+    individual.constraint_violation = 0.0; // Reset violation
 
     for (size_t i = 0; i < all_transactions.size(); ++i) {
         if (individual.included_transactions[i]) {
@@ -42,10 +47,35 @@ void calculate_objectives(Individual& individual, const std::vector<Transaction>
     }
     // Store the negative gas fee for minimization
     individual.negative_total_gas_fee = -total_gas_fee;
+
+    // --- NEW LOGIC ---
+    // Check if the constraint is violated and calculate by how much
+    if (individual.total_exec_time > mx_exec_time) {
+        individual.constraint_violation = individual.total_exec_time - mx_exec_time;
+    }
 }
 
-// Check if individual1 dominates individual2
+// --- REWRITTEN FUNCTION ---
+// Check for dominance using the constrained dominance principle
 bool dominates(const Individual& ind1, const Individual& ind2) {
+    bool ind1_is_feasible = (ind1.constraint_violation == 0);
+    bool ind2_is_feasible = (ind2.constraint_violation == 0);
+
+    // Case 1: One is feasible, the other is not
+    if (ind1_is_feasible && !ind2_is_feasible) {
+        return true;
+    }
+    if (!ind1_is_feasible && ind2_is_feasible) {
+        return false;
+    }
+
+    // Case 2: Both are infeasible
+    if (!ind1_is_feasible && !ind2_is_feasible) {
+        // The one with the smaller violation wins
+        return ind1.constraint_violation < ind2.constraint_violation;
+    }
+
+    // Case 3: Both are feasible -> use original dominance logic
     bool better_in_one = (ind1.total_exec_time < ind2.total_exec_time) || (ind1.negative_total_gas_fee < ind2.negative_total_gas_fee);
     bool not_worse_in_any = (ind1.total_exec_time <= ind2.total_exec_time) && (ind1.negative_total_gas_fee <= ind2.negative_total_gas_fee);
     return better_in_one && not_worse_in_any;
@@ -114,7 +144,7 @@ void calculate_crowding_distance(std::vector<Individual>& front) {
     double f_min = front[0].total_exec_time;
     if (f_max - f_min > 0) {
         for (int i = 1; i < size - 1; ++i) {
-            front[i].crowding_distance += (front[i + 1].total_exec_time - front[i - 1].total_exec_time) / (f_max - f_min);
+            front[i].crowding_distance += (front[i + 1].total_exec_time - front[i].total_exec_time) / (f_max - f_min);
         }
     }
 
@@ -128,7 +158,7 @@ void calculate_crowding_distance(std::vector<Individual>& front) {
     f_min = front[0].negative_total_gas_fee;
      if (f_max - f_min > 0) {
         for (int i = 1; i < size - 1; ++i) {
-            front[i].crowding_distance += (front[i + 1].negative_total_gas_fee - front[i - 1].negative_total_gas_fee) / (f_max - f_min);
+            front[i].crowding_distance += (front[i + 1].negative_total_gas_fee - front[i].negative_total_gas_fee) / (f_max - f_min);
         }
     }
 }
@@ -152,9 +182,11 @@ Individual selection(const std::vector<Individual>& population) {
 // Single-point crossover
 std::pair<Individual, Individual> crossover(const Individual& p1, const Individual& p2, double crossover_rate) {
     Individual c1 = p1, c2 = p2;
-    int crossover_point = rand() % p1.included_transactions.size();
-    for (int i = crossover_point; i < p1.included_transactions.size(); ++i) {
-        std::swap(c1.included_transactions[i], c2.included_transactions[i]);
+    if((double)rand() / RAND_MAX > crossover_rate) {
+        int crossover_point = rand() % p1.included_transactions.size();
+        for (int i = crossover_point; i < p1.included_transactions.size(); ++i) {
+            std::swap(c1.included_transactions[i], c2.included_transactions[i]);
+        }
     }
     return {c1, c2};
 }
@@ -171,9 +203,9 @@ void mutate(Individual& individual, double mutation_rate) {
 int main() {
     // 1. --- PROBLEM SETUP ---
     srand(time(0));
-    int population_size = 50;
-    int generations = 1000;
-    double mutation_rate = 0.05, crossover_rate = 0.95;
+    int population_size = 100;
+    int generations = 200;
+    double mutation_rate = 0.02, crossover_rate = 0.98;
 
     ifstream inputFile("input_7.txt");
     if (!inputFile.is_open()) {
@@ -192,7 +224,7 @@ int main() {
     // Create some random transactions for demonstration
     std::vector<Transaction> all_transactions;
     for (int i = 0; i < total_transactions; ++i) {
-        all_transactions.push_back({i, (double)exec_time[i], (double)gas_fees[i]});
+        all_transactions.push_back({i, (double)exec_time[i], (double)(gas_fees[i])});
     }
 
     // 2. --- INITIALIZATION ---
@@ -202,7 +234,7 @@ int main() {
         for (int i = 0; i < total_transactions; ++i) {
             ind.included_transactions[i] = (rand() % 2 == 0);
         }
-        calculate_objectives(ind, all_transactions);
+        calculate_objectives(ind, all_transactions, mx_exec_time);
     }
 
     // 3. --- GENERATIONAL LOOP ---
@@ -215,8 +247,8 @@ int main() {
             auto children = crossover(p1, p2,crossover_rate);
             mutate(children.first, mutation_rate);
             mutate(children.second, mutation_rate);
-            calculate_objectives(children.first, all_transactions);
-            calculate_objectives(children.second, all_transactions);
+            calculate_objectives(children.first, all_transactions, mx_exec_time);
+            calculate_objectives(children.second, all_transactions, mx_exec_time);
             offspring.push_back(children.first);
             offspring.push_back(children.second);
         }
@@ -255,17 +287,19 @@ int main() {
     // 4. --- OUTPUT THE FINAL PARETO FRONT ---
     auto final_fronts = non_dominated_sort(population);
     std::cout << "\n--- Final Pareto Front (Best Trade-offs) ---\n";
-    int ans = 0;
+    int ans = 0, cur_exec_time = 0;
     for (int index : final_fronts[0]) {
         const auto& sol = population[index];
-        // if(sol.total_exec_time < mx_exec_time) {
-        //     ans = max(ans, (int)-sol.negative_total_gas_fee);
-        // }
-        std::cout << "Solution: Time = " << sol.total_exec_time
-                  << ", Gas Fee = " << -sol.negative_total_gas_fee << std::endl;
+        if(-sol.negative_total_gas_fee > ans) {
+            ans = -sol.negative_total_gas_fee;
+            cur_exec_time = sol.total_exec_time;
+        }
+        // std::cout << "Solution: Time = " << sol.total_exec_time
+        //           << ", Gas Fee = " << -sol.negative_total_gas_fee << std::endl;
     }
 
-    // cout << "max gas fees:" << ans << endl;
+    std::cout << "Solution: Time = " << cur_exec_time
+                  << ", Gas Fee = " << ans << std::endl; 
 
     return 0;
 }
