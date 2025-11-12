@@ -19,31 +19,36 @@ using namespace std;
 int total_transactions, mx_exec_time;
 vector<int> exec_time, gas_fees;
 
+// Recursion explanation:
+// solve(i, remaining_time) = maximum gas fees we can get considering transactions from index i to end
+//                            with remaining_time execution time left
+// Base case: if i == total_transactions, return 0 (no more transactions)
+//           if remaining_time < 0, return -infinity (invalid state)
+// Recurrence: solve(i, remaining_time) = max(
+//                 solve(i+1, remaining_time),  // don't take transaction i
+//                 gas_fees[i] + solve(i+1, remaining_time - exec_time[i])  // take transaction i
+//             )
+
 int solve_using_dp() {
-    vector<int> dp(mx_exec_time+1);
+    // dp[i][j] = maximum gas fees using transactions from index i to end with j execution time remaining
+    vector<vector<int>> dp(total_transactions + 1, vector<int>(mx_exec_time + 1, 0));
     
-    for(int i = total_transactions-1; i >= 0; i--) {
-        for(int j = mx_exec_time; j >= exec_time[i]; j--) {
-            dp[j] = max(dp[j], gas_fees[i] + dp[j-exec_time[i]]);
+    // Base case: dp[total_transactions][j] = 0 for all j (already initialized)
+    
+    // Fill the dp table from bottom to top
+    for(int i = total_transactions - 1; i >= 0; i--) {
+        for(int j = 0; j <= mx_exec_time; j++) {
+            // Option 1: Don't take transaction i
+            dp[i][j] = dp[i+1][j];
+            
+            // Option 2: Take transaction i (if we have enough time)
+            if(j >= exec_time[i]) {
+                dp[i][j] = max(dp[i][j], gas_fees[i] + dp[i+1][j - exec_time[i]]);
+            }
         }
     }
- 
-    return dp[mx_exec_time];
-}
-
-int solve_using_moo() {
-    // step 1: Initialize the population
-    // 10 for ex
-    int initial_population;
-    cout << "enter the intial population:\n";
-    cin >> initial_population;
-
-    // we will use string of size total trasaction for each individual
-    // if the bit is set for that particular entry then it is present in the answer set
-    // ex: string "10010" represent we will take transaction 0 and 3.
-
-    // generate initial_population no. of string
-
+    
+    return dp[0][mx_exec_time];
 }
 
 int32_t main() {
