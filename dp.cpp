@@ -52,7 +52,7 @@ int solve_using_dp() {
 }
 
 int32_t main() {
-    ifstream inputFile("input_7.txt");
+    ifstream inputFile("ip4.txt");
     if (!inputFile.is_open()) {
         cerr << "Could not open the file!" << endl;
         return 1;
@@ -67,8 +67,8 @@ int32_t main() {
     
     int dp_ans = solve_using_dp();
 
-    ofstream outputFile("output_7.txt");
-    outputFile << dp_ans << endl;
-    outputFile.close();
+    // ofstream outputFile("output_7.txt");
+    cout << dp_ans << endl;
+    // outputFile.close();
     return 0;
 }

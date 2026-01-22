@@ -14,14 +14,14 @@ struct Transaction {
 };
 
 struct Individual {
-    std::vector<bool> included_transactions;
+    vector<bool> included_transactions;
 
     double total_exec_time;
     double negative_total_gas_fee; // We minimize this to maximize the fee
 
     // Stores how much the exec_time exceeds the maximum allowed time.
     // This will be 0 if the solution is feasible.
-    double constraint_violation = 0.0; 
+    double constraint_violation = 0.0;
 
     // NSGA-II specific fields
     int rank = 0; // The non-domination front number
@@ -187,11 +187,46 @@ void mutate(Individual& individual, double mutation_rate) {
     }
 }
 
+Individual greedy_solution(const vector<Transaction>& all_transactions, double mx_exec_time) {
+    Individual ind;
+    int n = all_transactions.size();
+    ind.included_transactions.assign(n, false); // Initialize all to false
+
+    // Create a vector of indices [0, 1, 2, ..., n-1] to sort
+    vector<int> order(n);
+    iota(order.begin(), order.end(), 0); 
+
+    // Sort indices based on decreasing Gas Fee / Execution Time ratio
+    sort(order.begin(), order.end(), [&](int a, int b) {
+        double r1 = all_transactions[a].gas_fee / all_transactions[a].exec_time;
+        double r2 = all_transactions[b].gas_fee / all_transactions[b].exec_time;
+        
+        // Compare ratios (descending)
+        if (abs(r1 - r2) > 1e-9) { 
+            return r1 > r2; 
+        }
+        // Tie-breaker: prefer smaller execution time if ratios are equal
+        return all_transactions[a].exec_time < all_transactions[b].exec_time;
+    });
+
+    double current_exec_time = 0.0;
+    
+    // Iterate through sorted transactions and select them if they fit
+    for (int idx : order) {
+        if (current_exec_time + all_transactions[idx].exec_time <= mx_exec_time) {
+            current_exec_time += all_transactions[idx].exec_time;
+            ind.included_transactions[idx] = true;
+        }
+    }
+
+    return ind;
+}
+
 int main() {
     srand(time(0));
-    int population_size = 100;
-    int generations = 1000;
-    double mutation_rate = 0.02, crossover_rate = 0.98;
+    int population_size = 20;
+    int generations = 100;
+    double mutation_rate = 0.1, crossover_rate = 0.98;
 
     ifstream inputFile("ip7.txt");
     if (!inputFile.is_open()) {
@@ -207,12 +242,17 @@ int main() {
     for(auto&e: exec_time) inputFile >> e;
     for(auto&e: gas_fees) inputFile >> e;
 
-    std::vector<Transaction> all_transactions;
+    vector<Transaction> all_transactions;
     for (int i = 0; i < total_transactions; ++i) {
         all_transactions.push_back({i, (double)exec_time[i], (double)(gas_fees[i])});
     }
 
-    std::vector<Individual> population(population_size);
+    // apply greedy solution on this transactions.
+    Individual greedy_ind = greedy_solution(all_transactions, mx_exec_time);
+    calculate_objectives(greedy_ind, all_transactions, mx_exec_time);
+
+    // code for randmom initialisation
+    vector<Individual> population(population_size);
     for (auto& ind : population) {
         ind.included_transactions.resize(total_transactions);
         for (int i = 0; i < total_transactions; ++i) {
@@ -220,6 +260,9 @@ int main() {
         }
         calculate_objectives(ind, all_transactions, mx_exec_time);
     }
+    
+    // choose all transacions included in that as starting point
+    population.push_back(greedy_ind);
 
     for (int gen = 0; gen < generations; ++gen) {
         std::vector<Individual> offspring;
