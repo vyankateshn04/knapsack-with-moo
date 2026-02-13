@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>     
 #include <chrono>
+#include <limits>
 
 using namespace std;
 
@@ -131,7 +132,7 @@ void calculate_crowding_distance(std::vector<Individual>& front) {
         return a.total_exec_time < b.total_exec_time;
     });
 
-    front[0].crowding_distance = front[size - 1].crowding_distance = 1; // Infinity for boundaries
+    front[0].crowding_distance = front[size - 1].crowding_distance = 1e9; // Infinity for boundaries
     double f_max = front[size - 1].total_exec_time;
     double f_min = front[0].total_exec_time;
     if (f_max - f_min > 0) {
@@ -145,7 +146,7 @@ void calculate_crowding_distance(std::vector<Individual>& front) {
         return a.negative_total_gas_fee < b.negative_total_gas_fee;
     });
 
-    front[0].crowding_distance = front[size - 1].crowding_distance = 1; // Infinity for boundaries
+    front[0].crowding_distance = front[size - 1].crowding_distance = 1e9; // Infinity for boundaries
     f_max = front[size - 1].negative_total_gas_fee;
     f_min = front[0].negative_total_gas_fee;
      if (f_max - f_min > 0) {
@@ -155,23 +156,96 @@ void calculate_crowding_distance(std::vector<Individual>& front) {
     }
 }
 
+// Assign rank and crowding distance on the full population so tournament
+// selection can use up-to-date NSGA-II metadata.
+void assign_rank_and_crowding(std::vector<Individual>& population) {
+    if (population.empty()) return;
+
+    auto fronts = non_dominated_sort(population);
+    const double kBoundaryDistance = 1e9;
+
+    for (auto& ind : population) {
+        ind.rank = std::numeric_limits<int>::max();
+        ind.crowding_distance = 0.0;
+    }
+
+    for (size_t front_idx = 0; front_idx < fronts.size(); ++front_idx) {
+        const auto& front = fronts[front_idx];
+        if (front.empty()) continue;
+
+        for (int idx : front) {
+            population[idx].rank = static_cast<int>(front_idx);
+            population[idx].crowding_distance = 0.0;
+        }
+
+        if (front.size() <= 2) {
+            for (int idx : front) {
+                population[idx].crowding_distance = kBoundaryDistance;
+            }
+            continue;
+        }
+
+        std::vector<int> order = front;
+        std::sort(order.begin(), order.end(), [&](int a, int b) {
+            return population[a].total_exec_time < population[b].total_exec_time;
+        });
+
+        population[order.front()].crowding_distance = kBoundaryDistance;
+        population[order.back()].crowding_distance = kBoundaryDistance;
+
+        double f_min = population[order.front()].total_exec_time;
+        double f_max = population[order.back()].total_exec_time;
+        if (f_max - f_min > 0.0) {
+            for (size_t i = 1; i + 1 < order.size(); ++i) {
+                int idx = order[i];
+                if (population[idx].crowding_distance < kBoundaryDistance) {
+                    population[idx].crowding_distance +=
+                        (population[order[i + 1]].total_exec_time - population[order[i - 1]].total_exec_time) /
+                        (f_max - f_min);
+                }
+            }
+        }
+
+        order = front;
+        std::sort(order.begin(), order.end(), [&](int a, int b) {
+            return population[a].negative_total_gas_fee < population[b].negative_total_gas_fee;
+        });
+
+        population[order.front()].crowding_distance = kBoundaryDistance;
+        population[order.back()].crowding_distance = kBoundaryDistance;
+
+        f_min = population[order.front()].negative_total_gas_fee;
+        f_max = population[order.back()].negative_total_gas_fee;
+        if (f_max - f_min > 0.0) {
+            for (size_t i = 1; i + 1 < order.size(); ++i) {
+                int idx = order[i];
+                if (population[idx].crowding_distance < kBoundaryDistance) {
+                    population[idx].crowding_distance +=
+                        (population[order[i + 1]].negative_total_gas_fee - population[order[i - 1]].negative_total_gas_fee) /
+                        (f_max - f_min);
+                }
+            }
+        }
+    }
+}
+
 // Tournament Selection based on rank and crowding distance
-Individual selection(const std::vector<Individual>& population) {
+int selection(const std::vector<Individual>& population) {
     int i = rand() % population.size();
     int j = rand() % population.size();
     const Individual& ind1 = population[i];
     const Individual& ind2 = population[j];
 
-    if (ind1.rank < ind2.rank) return ind1;
-    if (ind2.rank < ind1.rank) return ind2;
-    if (ind1.crowding_distance > ind2.crowding_distance) return ind1;
-    return ind2;
+    if (ind1.rank < ind2.rank) return i;
+    if (ind2.rank < ind1.rank) return j;
+    if (ind1.crowding_distance > ind2.crowding_distance) return i;
+    return j;
 }
 
 // Single-point crossover
 std::pair<Individual, Individual> crossover(const Individual& p1, const Individual& p2, double crossover_rate) {
     Individual c1 = p1, c2 = p2;
-    if((double)rand() / RAND_MAX > crossover_rate) {
+    if((double)rand() / RAND_MAX < crossover_rate) {
         int crossover_point = rand() % p1.included_transactions.size();
         for (int i = crossover_point; i < p1.included_transactions.size(); ++i) {
             std::swap(c1.included_transactions[i], c2.included_transactions[i]);
@@ -209,10 +283,12 @@ int main(int argc, char* argv[]) {
     string filename = argv[1];
     double mx_exec_time = stod(argv[2]);
 
-    int population_size = 100;
-    int generations = 200;
+    int population_size = 50;
+    int generations = 100;
     double mutation_rate = 0.001;
-    double crossover_rate = 0.95;
+    double crossover_rate = 0.97;
+
+    cout << "population: " << population_size << ", gen: " << generations << endl;
 
     // ============================================================
     // READ CSV
@@ -262,7 +338,7 @@ int main(int argc, char* argv[]) {
 
     int total_transactions = all_transactions.size();
     if (total_transactions == 0) return 0;
-    cout << total_transactions << endl;
+    cout << "total transactions: " << total_transactions << endl;
     // ============================================================
     // INITIALIZE POPULATION
     // ============================================================
@@ -279,20 +355,22 @@ int main(int argc, char* argv[]) {
         calculate_objectives(ind, all_transactions, mx_exec_time);
     }
 
-    cout << population[0].negative_total_gas_fee << endl;
+    // cout << population[0].negative_total_gas_fee << endl;
 
     // ============================================================
     // EVOLUTION LOOP
     // ============================================================
 
     for (int gen = 0; gen < generations; ++gen) {
-
+        //p1
+        assign_rank_and_crowding(population);
+        //p2
         vector<Individual> offspring;
 
         while (offspring.size() < population_size) {
 
-            Individual p1 = selection(population);
-            Individual p2 = selection(population);
+            Individual p1 = population[selection(population)];
+            Individual p2 = population[selection(population)];
 
             auto children = crossover(p1, p2, crossover_rate);
 
@@ -308,6 +386,8 @@ int main(int argc, char* argv[]) {
 
         vector<Individual> combined_pop = population;
         combined_pop.insert(combined_pop.end(), offspring.begin(), offspring.end());
+
+        //p3
 
         auto fronts = non_dominated_sort(combined_pop);
 
@@ -345,6 +425,7 @@ int main(int argc, char* argv[]) {
         }
 
         population = next_population;
+        //p4
     }
 
     // ============================================================
