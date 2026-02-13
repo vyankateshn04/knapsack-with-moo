@@ -361,39 +361,52 @@ int main(int argc, char* argv[]) {
     // EVOLUTION LOOP
     // ============================================================
 
+    long long total_p0_to_p1_us = 0;
     long long total_p1_to_p2_us = 0;
     long long total_p2_to_p3_us = 0;
     long long total_p3_to_p4_us = 0;
     long long total_generation_us = 0;
 
     for (int gen = 0; gen < generations; ++gen) {
-        auto t_gen_start = chrono::steady_clock::now();
         //p1
         assign_rank_and_crowding(population);
-        auto t_after_p1 = chrono::steady_clock::now();
         //p2
         vector<Individual> offspring;
-
+        
         while (offspring.size() < population_size) {
-
+            auto t_gen_start = chrono::steady_clock::now();
+            
             Individual p1 = population[selection(population)];
             Individual p2 = population[selection(population)];
-
+            
+            auto t_after_p1 = chrono::steady_clock::now();
+            
             auto children = crossover(p1, p2, crossover_rate);
+            
+            auto t_after_p2 = chrono::steady_clock::now();
 
             mutate(children.first, mutation_rate);
             mutate(children.second, mutation_rate);
 
+            auto t_after_p3 = chrono::steady_clock::now();
+
             calculate_objectives(children.first, all_transactions, mx_exec_time);
             calculate_objectives(children.second, all_transactions, mx_exec_time);
 
+            auto t_after_p4 = chrono::steady_clock::now();
+
             offspring.push_back(children.first);
             offspring.push_back(children.second);
+
+            total_p0_to_p1_us += chrono::duration_cast<chrono::microseconds>(t_after_p1 - t_gen_start).count();
+            total_p1_to_p2_us += chrono::duration_cast<chrono::microseconds>(t_after_p2 - t_after_p1).count();
+            total_p2_to_p3_us += chrono::duration_cast<chrono::microseconds>(t_after_p3 - t_after_p2).count();
+            total_p3_to_p4_us += chrono::duration_cast<chrono::milliseconds>(t_after_p4 - t_after_p3).count();
+            total_generation_us += chrono::duration_cast<chrono::microseconds>(t_after_p4 - t_gen_start).count();
         }
 
         vector<Individual> combined_pop = population;
         combined_pop.insert(combined_pop.end(), offspring.begin(), offspring.end());
-        auto t_after_p2 = chrono::steady_clock::now();
 
         //p3
 
@@ -434,12 +447,6 @@ int main(int argc, char* argv[]) {
 
         population = next_population;
         //p4
-        auto t_after_p3 = chrono::steady_clock::now();
-
-        total_p1_to_p2_us += chrono::duration_cast<chrono::microseconds>(t_after_p1 - t_gen_start).count();
-        total_p2_to_p3_us += chrono::duration_cast<chrono::microseconds>(t_after_p2 - t_after_p1).count();
-        total_p3_to_p4_us += chrono::duration_cast<chrono::microseconds>(t_after_p3 - t_after_p2).count();
-        total_generation_us += chrono::duration_cast<chrono::microseconds>(t_after_p3 - t_gen_start).count();
     }
 
     // cout << "time taken: " << total_p1_to_p2_us << " " 
@@ -499,6 +506,7 @@ int main(int argc, char* argv[]) {
     auto end = chrono::steady_clock::now();
 
     cout << "time taken: " << chrono::duration_cast<chrono::milliseconds>(end - start).count() << endl;
+    cout << "aggeregate p0->p1 time (ms): " << (total_p0_to_p1_us / 1000.0) << endl;
     cout << "aggregate p1->p2 time (ms): " << (total_p1_to_p2_us / 1000.0) << endl;
     cout << "aggregate p2->p3 time (ms): " << (total_p2_to_p3_us / 1000.0) << endl;
     cout << "aggregate p3->p4 time (ms): " << (total_p3_to_p4_us / 1000.0) << endl;
