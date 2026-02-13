@@ -230,9 +230,10 @@ void assign_rank_and_crowding(std::vector<Individual>& population) {
 }
 
 // Tournament Selection based on rank and crowding distance
-int selection(const std::vector<Individual>& population) {
-    int i = rand() % population.size();
-    int j = rand() % population.size();
+int selection(const std::vector<Individual>& population, std::mt19937_64& rng) {
+    std::uniform_int_distribution<int> pick_idx(0, static_cast<int>(population.size()) - 1);
+    int i = pick_idx(rng);
+    int j = pick_idx(rng);
     const Individual& ind1 = population[i];
     const Individual& ind2 = population[j];
 
@@ -243,11 +244,18 @@ int selection(const std::vector<Individual>& population) {
 }
 
 // Single-point crossover
-std::pair<Individual, Individual> crossover(const Individual& p1, const Individual& p2, double crossover_rate) {
+std::pair<Individual, Individual> crossover(
+    const Individual& p1,
+    const Individual& p2,
+    double crossover_rate,
+    std::mt19937_64& rng
+) {
     Individual c1 = p1, c2 = p2;
-    if((double)rand() / RAND_MAX < crossover_rate) {
-        int crossover_point = rand() % p1.included_transactions.size();
-        for (int i = crossover_point; i < p1.included_transactions.size(); ++i) {
+    std::bernoulli_distribution do_crossover(crossover_rate);
+    if (do_crossover(rng)) {
+        std::uniform_int_distribution<size_t> point_dist(0, p1.included_transactions.size() - 1);
+        size_t crossover_point = point_dist(rng);
+        for (size_t i = crossover_point; i < p1.included_transactions.size(); ++i) {
             std::swap(c1.included_transactions[i], c2.included_transactions[i]);
         }
     }
@@ -255,11 +263,33 @@ std::pair<Individual, Individual> crossover(const Individual& p1, const Individu
 }
 
 // Bit-flip mutation
-void mutate(Individual& individual, double mutation_rate) {
-    for (size_t i = 0; i < individual.included_transactions.size(); ++i) {
-        if ((double)rand() < mutation_rate * RAND_MAX) {
+void mutate(Individual& individual, double mutation_rate, std::mt19937_64& rng) {
+    const size_t n = individual.included_transactions.size();
+    if (n == 0 || mutation_rate <= 0.0) return;
+
+    if (mutation_rate >= 1.0) {
+        for (size_t i = 0; i < n; ++i) {
             individual.included_transactions[i] = !individual.included_transactions[i];
         }
+        return;
+    }
+
+    static thread_local std::geometric_distribution<size_t> gap_dist;
+    static thread_local double cached_rate = -1.0;
+    if (cached_rate != mutation_rate) {
+        gap_dist.param(std::geometric_distribution<size_t>::param_type(mutation_rate));
+        cached_rate = mutation_rate;
+    }
+
+    size_t idx = gap_dist(rng);
+
+    while (idx < n) {
+        individual.included_transactions[idx] = !individual.included_transactions[idx];
+        size_t gap = gap_dist(rng);
+        if (idx > std::numeric_limits<size_t>::max() - 1 - gap) {
+            break;
+        }
+        idx += 1 + gap;
     }
 }
 
@@ -278,7 +308,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    srand(42);  // fixed seed for reproducibility
+    std::mt19937_64 rng(42); // fixed seed for reproducibility
 
     string filename = argv[1];
     double mx_exec_time = stod(argv[2]);
@@ -347,9 +377,10 @@ int main(int argc, char* argv[]) {
 
     for (auto& ind : population) {
         ind.included_transactions.resize(total_transactions);
+        std::bernoulli_distribution init_pick(15.0 / 1000.0);
 
         for (int i = 0; i < total_transactions; ++i) {
-            ind.included_transactions[i] = (rand() % 1000 < 15);
+            ind.included_transactions[i] = init_pick(rng);
         }
 
         calculate_objectives(ind, all_transactions, mx_exec_time);
@@ -361,11 +392,12 @@ int main(int argc, char* argv[]) {
     // EVOLUTION LOOP
     // ============================================================
 
-    long long total_p0_to_p1_us = 0;
-    long long total_p1_to_p2_us = 0;
-    long long total_p2_to_p3_us = 0;
-    long long total_p3_to_p4_us = 0;
-    long long total_generation_us = 0;
+    // long long total_p0_to_p1_us = 0;
+    // long long total_p1_to_p2_us = 0;
+    // long long total_p2_to_p3_us = 0;
+    // long long total_p3_to_p4_ns = 0;
+    // long long total_generation_us = 0;
+    // long long total_children_evaluated = 0;
 
     for (int gen = 0; gen < generations; ++gen) {
         //p1
@@ -374,35 +406,35 @@ int main(int argc, char* argv[]) {
         vector<Individual> offspring;
         
         while (offspring.size() < population_size) {
-            auto t_gen_start = chrono::steady_clock::now();
+            // auto t_gen_start = chrono::steady_clock::now();
             
-            Individual p1 = population[selection(population)];
-            Individual p2 = population[selection(population)];
+            Individual p1 = population[selection(population, rng)];
+            Individual p2 = population[selection(population, rng)];
             
-            auto t_after_p1 = chrono::steady_clock::now();
+            // auto t_after_p1 = chrono::steady_clock::now();
             
-            auto children = crossover(p1, p2, crossover_rate);
+            auto children = crossover(p1, p2, crossover_rate, rng);
             
-            auto t_after_p2 = chrono::steady_clock::now();
+            // auto t_after_p2 = chrono::steady_clock::now();
 
-            mutate(children.first, mutation_rate);
-            mutate(children.second, mutation_rate);
+            mutate(children.first, mutation_rate, rng);
+            mutate(children.second, mutation_rate, rng);
 
-            auto t_after_p3 = chrono::steady_clock::now();
+            // auto t_after_p3 = chrono::steady_clock::now();
 
             calculate_objectives(children.first, all_transactions, mx_exec_time);
             calculate_objectives(children.second, all_transactions, mx_exec_time);
 
-            auto t_after_p4 = chrono::steady_clock::now();
+            // auto t_after_p4 = chrono::steady_clock::now();
 
             offspring.push_back(children.first);
             offspring.push_back(children.second);
 
-            total_p0_to_p1_us += chrono::duration_cast<chrono::microseconds>(t_after_p1 - t_gen_start).count();
-            total_p1_to_p2_us += chrono::duration_cast<chrono::microseconds>(t_after_p2 - t_after_p1).count();
-            total_p2_to_p3_us += chrono::duration_cast<chrono::microseconds>(t_after_p3 - t_after_p2).count();
-            total_p3_to_p4_us += chrono::duration_cast<chrono::milliseconds>(t_after_p4 - t_after_p3).count();
-            total_generation_us += chrono::duration_cast<chrono::microseconds>(t_after_p4 - t_gen_start).count();
+            // total_p0_to_p1_us += chrono::duration_cast<chrono::microseconds>(t_after_p1 - t_gen_start).count();
+            // total_p1_to_p2_us += chrono::duration_cast<chrono::microseconds>(t_after_p2 - t_after_p1).count();
+            // total_p2_to_p3_us += chrono::duration_cast<chrono::microseconds>(t_after_p3 - t_after_p2).count();
+            // total_p3_to_p4_ns += chrono::duration_cast<chrono::microseconds>(t_after_p4 - t_after_p3).count();
+            // total_generation_us += chrono::duration_cast<chrono::microseconds>(t_after_p4 - t_gen_start).count();
         }
 
         vector<Individual> combined_pop = population;
@@ -506,11 +538,11 @@ int main(int argc, char* argv[]) {
     auto end = chrono::steady_clock::now();
 
     cout << "time taken: " << chrono::duration_cast<chrono::milliseconds>(end - start).count() << endl;
-    cout << "aggeregate p0->p1 time (ms): " << (total_p0_to_p1_us / 1000.0) << endl;
-    cout << "aggregate p1->p2 time (ms): " << (total_p1_to_p2_us / 1000.0) << endl;
-    cout << "aggregate p2->p3 time (ms): " << (total_p2_to_p3_us / 1000.0) << endl;
-    cout << "aggregate p3->p4 time (ms): " << (total_p3_to_p4_us / 1000.0) << endl;
-    cout << "aggregate generation time (ms): " << (total_generation_us / 1000.0) << endl;
+    // cout << "aggeregate p0->p1 time (ms): " << (total_p0_to_p1_us / 1000.0) << endl;
+    // cout << "aggregate p1->p2 time (ms): " << (total_p1_to_p2_us / 1000.0) << endl;
+    // cout << "aggregate p2->p3 time (ms): " << (total_p2_to_p3_us / 1000.0) << endl;
+    // cout << "aggregate p3->p4 time (ms): " << (total_p3_to_p4_ns / 1000000.0) << endl;
+    // cout << "aggregate generation time (ms): " << (total_generation_us / 1000.0) << endl;
 
     cout << "fee: " << -best_solution.negative_total_gas_fee <<"\ngas used:" << best_solution.total_exec_time << endl;
     return 0;
