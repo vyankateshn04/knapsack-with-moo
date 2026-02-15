@@ -411,17 +411,20 @@ int main(int argc, char* argv[]) {
     // EVOLUTION LOOP
     // ============================================================
 
-    // long long total_p0_to_p1_us = 0;
-    // long long total_p1_to_p2_us = 0;
-    // long long total_p2_to_p3_us = 0;
-    // long long total_p3_to_p4_ns = 0;
-    // long long total_generation_us = 0;
+    long long total_p0_to_p1_us = 0;
+    long long total_p1_to_p2_us = 0;
+    long long total_p2_to_p3_us = 0;
+    long long total_p3_to_p4_ns = 0;
+    long long total_generation_us = 0;
     // long long total_children_evaluated = 0;
 
     for (int gen = 0; gen < generations; ++gen) {
-        //p1
+        // auto t_start = chrono::steady_clock::now();
+        
         assign_rank_and_crowding(population);
-        //p2
+    
+        // auto t_after_p1 = chrono::steady_clock::now();    
+        
         vector<Individual> offspring;
         
         while (offspring.size() < population_size) {
@@ -459,9 +462,11 @@ int main(int argc, char* argv[]) {
         vector<Individual> combined_pop = population;
         combined_pop.insert(combined_pop.end(), offspring.begin(), offspring.end());
 
-        //p3
+        // auto t_after_p2 = chrono::steady_clock::now();
 
         auto fronts = non_dominated_sort(combined_pop);
+
+        // auto t_after_p3 = chrono::steady_clock::now();
 
         vector<Individual> next_population;
 
@@ -497,7 +502,14 @@ int main(int argc, char* argv[]) {
         }
 
         population = next_population;
-        //p4
+        auto t_after_p4 = chrono::steady_clock::now();
+
+        // total_p0_to_p1_us += chrono::duration_cast<chrono::microseconds>(t_after_p1 - t_start).count();
+        // total_p1_to_p2_us += chrono::duration_cast<chrono::microseconds>(t_after_p2 - t_after_p1).count();
+        // total_p2_to_p3_us += chrono::duration_cast<chrono::microseconds>(t_after_p3 - t_after_p2).count();
+        // total_p3_to_p4_ns += chrono::duration_cast<chrono::microseconds>(t_after_p4 - t_after_p3).count();
+        // total_generation_us += chrono::duration_cast<chrono::microseconds>(t_after_p4 - t_start).count();
+        
     }
 
     // cout << "time taken: " << total_p1_to_p2_us << " " 
