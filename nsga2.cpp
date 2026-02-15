@@ -541,7 +541,7 @@ int main(int argc, char* argv[]) {
     // cout << "aggeregate p0->p1 time (ms): " << (total_p0_to_p1_us / 1000.0) << endl;
     // cout << "aggregate p1->p2 time (ms): " << (total_p1_to_p2_us / 1000.0) << endl;
     // cout << "aggregate p2->p3 time (ms): " << (total_p2_to_p3_us / 1000.0) << endl;
-    // cout << "aggregate p3->p4 time (ms): " << (total_p3_to_p4_ns / 1000000.0) << endl;
+    // cout << "aggregate p3->p4 time (ms): " << (total_p3_to_p4_ns / 1000.0) << endl;
     // cout << "aggregate generation time (ms): " << (total_generation_us / 1000.0) << endl;
 
     cout << "fee: " << -best_solution.negative_total_gas_fee <<"\ngas used:" << best_solution.total_exec_time << endl;
