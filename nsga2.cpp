@@ -17,10 +17,10 @@ struct Transaction {
 };
 
 struct Individual {
-    vector<char> included_transactions;
+    vector<int> selected_idx;
 
-    double total_gas_units;
-    double negative_total_tx_fee;
+    double total_gas_units = 0.0;
+    double negative_total_tx_fee = 0.0;
 
     double constraint_violation = 0.0;
 
@@ -34,11 +34,9 @@ void calculate_objectives(Individual& individual, const vector<Transaction>& all
     double total_tx_fee = 0.0;
     individual.constraint_violation = 0.0;
 
-    for (size_t i = 0; i < all_transactions.size(); ++i) {
-        if (individual.included_transactions[i]) {
-            individual.total_gas_units += all_transactions[i].gas_units;
-            total_tx_fee += all_transactions[i].tx_fee;
-        }
+    for (int tx_id : individual.selected_idx) {
+        individual.total_gas_units += all_transactions[tx_id].gas_units;
+        total_tx_fee += all_transactions[tx_id].tx_fee;
     }
     // Store the negative tx fee for minimization
     individual.negative_total_tx_fee = -total_tx_fee;
@@ -46,6 +44,15 @@ void calculate_objectives(Individual& individual, const vector<Transaction>& all
     // Check if the constraint is violated and calculate by how much
     if (individual.total_gas_units > mx_gas_units) {
         individual.constraint_violation = individual.total_gas_units - mx_gas_units;
+    }
+}
+
+void toggle_selected_sorted(vector<int>& selected_idx, int tx_id) {
+    auto it = lower_bound(selected_idx.begin(), selected_idx.end(), tx_id);
+    if (it != selected_idx.end() && *it == tx_id) {
+        selected_idx.erase(it);
+    } else {
+        selected_idx.insert(it, tx_id);
     }
 }
 
@@ -244,28 +251,41 @@ pair<Individual, Individual> crossover(
     const Individual& p1,
     const Individual& p2,
     double crossover_rate,
-    mt19937_64& rng
+    mt19937_64& rng,
+    int total_transactions
 ) {
     Individual c1 = p1, c2 = p2;
     bernoulli_distribution do_crossover(crossover_rate);
     if (do_crossover(rng)) {
-        uniform_int_distribution<size_t> point_dist(0, p1.included_transactions.size() - 1);
-        size_t crossover_point = point_dist(rng);
-        for (size_t i = crossover_point; i < p1.included_transactions.size(); ++i) {
-            swap(c1.included_transactions[i], c2.included_transactions[i]);
-        }
+        uniform_int_distribution<int> point_dist(0, total_transactions - 1);
+        int crossover_point = point_dist(rng);
+
+        auto p1_split = lower_bound(p1.selected_idx.begin(), p1.selected_idx.end(), crossover_point);
+        auto p2_split = lower_bound(p2.selected_idx.begin(), p2.selected_idx.end(), crossover_point);
+
+        c1.selected_idx.clear();
+        c1.selected_idx.reserve(distance(p1.selected_idx.begin(), p1_split) +
+                                distance(p2_split, p2.selected_idx.end()));
+        c1.selected_idx.insert(c1.selected_idx.end(), p1.selected_idx.begin(), p1_split);
+        c1.selected_idx.insert(c1.selected_idx.end(), p2_split, p2.selected_idx.end());
+
+        c2.selected_idx.clear();
+        c2.selected_idx.reserve(distance(p2.selected_idx.begin(), p2_split) +
+                                distance(p1_split, p1.selected_idx.end()));
+        c2.selected_idx.insert(c2.selected_idx.end(), p2.selected_idx.begin(), p2_split);
+        c2.selected_idx.insert(c2.selected_idx.end(), p1_split, p1.selected_idx.end());
     }
     return {c1, c2};
 }
 
 // Bit-flip mutation
-void mutate(Individual& individual, double mutation_rate, mt19937_64& rng) {
-    const size_t n = individual.included_transactions.size();
+void mutate(Individual& individual, int total_transactions, double mutation_rate, mt19937_64& rng) {
+    const size_t n = static_cast<size_t>(total_transactions);
     if (n == 0 || mutation_rate <= 0.0) return;
 
     if (mutation_rate >= 1.0) {
         for (size_t i = 0; i < n; ++i) {
-            individual.included_transactions[i] = !individual.included_transactions[i];
+            toggle_selected_sorted(individual.selected_idx, static_cast<int>(i));
         }
         return;
     }
@@ -280,7 +300,7 @@ void mutate(Individual& individual, double mutation_rate, mt19937_64& rng) {
     size_t idx = gap_dist(rng);
 
     while (idx < n) {
-        individual.included_transactions[idx] = !individual.included_transactions[idx];
+        toggle_selected_sorted(individual.selected_idx, static_cast<int>(idx));
         size_t gap = gap_dist(rng);
         if (idx > numeric_limits<size_t>::max() - 1 - gap) {
             break;
@@ -311,8 +331,8 @@ int main(int argc, char* argv[]) {
 
     int population_size = 50;
     int generations = 100;
-    double mutation_rate = 0.001;
-    double crossover_rate = 0.97;
+    double mutation_rate = 0.0015;
+    double crossover_rate = 0.95;
 
     cout << "population: " << population_size << ", gen: " << generations << endl;
 
@@ -372,11 +392,14 @@ int main(int argc, char* argv[]) {
     vector<Individual> population(population_size);
 
     for (auto& ind : population) {
-        ind.included_transactions.resize(total_transactions);
         bernoulli_distribution init_pick(15.0 / 1000.0);
+        ind.selected_idx.clear();
+        ind.selected_idx.reserve(static_cast<size_t>(total_transactions * 0.05));
 
         for (int i = 0; i < total_transactions; ++i) {
-            ind.included_transactions[i] = init_pick(rng);
+            if (init_pick(rng)) {
+                ind.selected_idx.push_back(i);
+            }
         }
 
         calculate_objectives(ind, all_transactions, mx_gas_units);
@@ -409,12 +432,12 @@ int main(int argc, char* argv[]) {
             
             // auto t_after_p1 = chrono::steady_clock::now();
             
-            auto children = crossover(p1, p2, crossover_rate, rng);
+            auto children = crossover(p1, p2, crossover_rate, rng, total_transactions);
             
             // auto t_after_p2 = chrono::steady_clock::now();
 
-            mutate(children.first, mutation_rate, rng);
-            mutate(children.second, mutation_rate, rng);
+            mutate(children.first, total_transactions, mutation_rate, rng);
+            mutate(children.second, total_transactions, mutation_rate, rng);
 
             // auto t_after_p3 = chrono::steady_clock::now();
 
@@ -525,10 +548,8 @@ int main(int argc, char* argv[]) {
     // OUTPUT ONLY SELECTED TRANSACTION INDICES
     // ============================================================
 
-    // for (int i = 0; i < best_solution.included_transactions.size(); ++i) {
-    //     if (best_solution.included_transactions[i]) {
-    //         cout << i << "\n";
-    //     }
+    // for (int tx_id : best_solution.selected_idx) {
+    //     cout << tx_id << "\n";
     // }
 
     auto end = chrono::steady_clock::now();
