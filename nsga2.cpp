@@ -12,42 +12,40 @@ using namespace std;
 
 struct Transaction {
     int id;
-    double exec_time;
-    double gas_fee;
+    double gas_units;
+    double tx_fee;
 };
 
 struct Individual {
     vector<char> included_transactions;
 
-    double total_exec_time;
-    double negative_total_gas_fee; // We minimize this to maximize the fee
+    double total_gas_units;
+    double negative_total_tx_fee;
 
-    // Stores how much the exec_time exceeds the maximum allowed time.
-    // This will be 0 if the solution is feasible.
-    double constraint_violation = 0.0; 
+    double constraint_violation = 0.0;
 
     // NSGA-II specific fields
-    int rank = 0; // The non-domination front number
+    int rank = 0;
     double crowding_distance = 0.0;
 };
 
-void calculate_objectives(Individual& individual, const vector<Transaction>& all_transactions, double mx_exec_time) {
-    individual.total_exec_time = 0.0;
-    double total_gas_fee = 0.0;
+void calculate_objectives(Individual& individual, const vector<Transaction>& all_transactions, double mx_gas_units) {
+    individual.total_gas_units = 0.0;
+    double total_tx_fee = 0.0;
     individual.constraint_violation = 0.0;
 
     for (size_t i = 0; i < all_transactions.size(); ++i) {
         if (individual.included_transactions[i]) {
-            individual.total_exec_time += all_transactions[i].exec_time;
-            total_gas_fee += all_transactions[i].gas_fee;
+            individual.total_gas_units += all_transactions[i].gas_units;
+            total_tx_fee += all_transactions[i].tx_fee;
         }
     }
-    // Store the negative gas fee for minimization
-    individual.negative_total_gas_fee = -total_gas_fee;
+    // Store the negative tx fee for minimization
+    individual.negative_total_tx_fee = -total_tx_fee;
 
     // Check if the constraint is violated and calculate by how much
-    if (individual.total_exec_time > mx_exec_time) {
-        individual.constraint_violation = individual.total_exec_time - mx_exec_time;
+    if (individual.total_gas_units > mx_gas_units) {
+        individual.constraint_violation = individual.total_gas_units - mx_gas_units;
     }
 }
 
@@ -71,8 +69,8 @@ bool dominates(const Individual& ind1, const Individual& ind2) {
     }
 
     // Case 3: Both are feasible -> use original dominance logic
-    bool better_in_one = (ind1.total_exec_time < ind2.total_exec_time) || (ind1.negative_total_gas_fee < ind2.negative_total_gas_fee);
-    bool not_worse_in_any = (ind1.total_exec_time <= ind2.total_exec_time) && (ind1.negative_total_gas_fee <= ind2.negative_total_gas_fee);
+    bool better_in_one = (ind1.total_gas_units < ind2.total_gas_units) || (ind1.negative_total_tx_fee < ind2.negative_total_tx_fee);
+    bool not_worse_in_any = (ind1.total_gas_units <= ind2.total_gas_units) && (ind1.negative_total_tx_fee <= ind2.negative_total_tx_fee);
     return better_in_one && not_worse_in_any;
 }
 
@@ -127,37 +125,35 @@ void calculate_crowding_distance(vector<Individual>& front) {
         ind.crowding_distance = 0.0;
     }
 
-    // Sort by first objective (exec_time)
+    // Sort by first objective (gas_units)
     sort(front.begin(), front.end(), [](const Individual& a, const Individual& b) {
-        return a.total_exec_time < b.total_exec_time;
+        return a.total_gas_units < b.total_gas_units;
     });
 
     front[0].crowding_distance = front[size - 1].crowding_distance = 1e9; // Infinity for boundaries
-    double f_max = front[size - 1].total_exec_time;
-    double f_min = front[0].total_exec_time;
+    double f_max = front[size - 1].total_gas_units;
+    double f_min = front[0].total_gas_units;
     if (f_max - f_min > 0) {
         for (int i = 1; i < size - 1; ++i) {
-            front[i].crowding_distance += (front[i + 1].total_exec_time - front[i].total_exec_time) / (f_max - f_min);
+            front[i].crowding_distance += (front[i + 1].total_gas_units - front[i].total_gas_units) / (f_max - f_min);
         }
     }
 
-    // Sort by second objective (gas_fee)
+    // Sort by second objective (tx_fee)
     sort(front.begin(), front.end(), [](const Individual& a, const Individual& b) {
-        return a.negative_total_gas_fee < b.negative_total_gas_fee;
+        return a.negative_total_tx_fee < b.negative_total_tx_fee;
     });
 
     front[0].crowding_distance = front[size - 1].crowding_distance = 1e9; // Infinity for boundaries
-    f_max = front[size - 1].negative_total_gas_fee;
-    f_min = front[0].negative_total_gas_fee;
+    f_max = front[size - 1].negative_total_tx_fee;
+    f_min = front[0].negative_total_tx_fee;
      if (f_max - f_min > 0) {
         for (int i = 1; i < size - 1; ++i) {
-            front[i].crowding_distance += (front[i + 1].negative_total_gas_fee - front[i].negative_total_gas_fee) / (f_max - f_min);
+            front[i].crowding_distance += (front[i + 1].negative_total_tx_fee - front[i].negative_total_tx_fee) / (f_max - f_min);
         }
     }
 }
 
-// Assign rank and crowding distance on the full population so tournament
-// selection can use up-to-date NSGA-II metadata.
 void assign_rank_and_crowding(vector<Individual>& population) {
     if (population.empty()) return;
 
@@ -187,20 +183,20 @@ void assign_rank_and_crowding(vector<Individual>& population) {
 
         vector<int> order = front;
         sort(order.begin(), order.end(), [&](int a, int b) {
-            return population[a].total_exec_time < population[b].total_exec_time;
+            return population[a].total_gas_units < population[b].total_gas_units;
         });
 
         population[order.front()].crowding_distance = kBoundaryDistance;
         population[order.back()].crowding_distance = kBoundaryDistance;
 
-        double f_min = population[order.front()].total_exec_time;
-        double f_max = population[order.back()].total_exec_time;
+        double f_min = population[order.front()].total_gas_units;
+        double f_max = population[order.back()].total_gas_units;
         if (f_max - f_min > 0.0) {
             for (size_t i = 1; i + 1 < order.size(); ++i) {
                 int idx = order[i];
                 if (population[idx].crowding_distance < kBoundaryDistance) {
                     population[idx].crowding_distance +=
-                        (population[order[i + 1]].total_exec_time - population[order[i - 1]].total_exec_time) /
+                        (population[order[i + 1]].total_gas_units - population[order[i - 1]].total_gas_units) /
                         (f_max - f_min);
                 }
             }
@@ -208,20 +204,20 @@ void assign_rank_and_crowding(vector<Individual>& population) {
 
         order = front;
         sort(order.begin(), order.end(), [&](int a, int b) {
-            return population[a].negative_total_gas_fee < population[b].negative_total_gas_fee;
+            return population[a].negative_total_tx_fee < population[b].negative_total_tx_fee;
         });
 
         population[order.front()].crowding_distance = kBoundaryDistance;
         population[order.back()].crowding_distance = kBoundaryDistance;
 
-        f_min = population[order.front()].negative_total_gas_fee;
-        f_max = population[order.back()].negative_total_gas_fee;
+        f_min = population[order.front()].negative_total_tx_fee;
+        f_max = population[order.back()].negative_total_tx_fee;
         if (f_max - f_min > 0.0) {
             for (size_t i = 1; i + 1 < order.size(); ++i) {
                 int idx = order[i];
                 if (population[idx].crowding_distance < kBoundaryDistance) {
                     population[idx].crowding_distance +=
-                        (population[order[i + 1]].negative_total_gas_fee - population[order[i - 1]].negative_total_gas_fee) /
+                        (population[order[i + 1]].negative_total_tx_fee - population[order[i - 1]].negative_total_tx_fee) /
                         (f_max - f_min);
                 }
             }
@@ -311,7 +307,7 @@ int main(int argc, char* argv[]) {
     mt19937_64 rng(42); // fixed seed for reproducibility
 
     string filename = argv[1];
-    double mx_exec_time = stod(argv[2]);
+    double mx_gas_units = stod(argv[2]);
 
     int population_size = 50;
     int generations = 100;
@@ -383,10 +379,10 @@ int main(int argc, char* argv[]) {
             ind.included_transactions[i] = init_pick(rng);
         }
 
-        calculate_objectives(ind, all_transactions, mx_exec_time);
+        calculate_objectives(ind, all_transactions, mx_gas_units);
     }
 
-    // cout << population[0].negative_total_gas_fee << endl;
+    // cout << population[0].negative_total_tx_fee << endl;
 
     // ============================================================
     // EVOLUTION LOOP
@@ -422,8 +418,8 @@ int main(int argc, char* argv[]) {
 
             // auto t_after_p3 = chrono::steady_clock::now();
 
-            calculate_objectives(children.first, all_transactions, mx_exec_time);
-            calculate_objectives(children.second, all_transactions, mx_exec_time);
+            calculate_objectives(children.first, all_transactions, mx_gas_units);
+            calculate_objectives(children.second, all_transactions, mx_gas_units);
 
             // auto t_after_p4 = chrono::steady_clock::now();
 
@@ -496,19 +492,19 @@ int main(int argc, char* argv[]) {
 
     if (final_fronts.empty() || final_fronts[0].empty()) return 0;
 
-    int counting = 0, total = 0;
+    // int counting = 0, total = 0;
 
     for (int index : final_fronts[0]) {
 
         const auto& sol = population[index];
 
-        ++total;
+        // ++total;
 
         if (sol.constraint_violation == 0) {
 
-            ++counting;
+            // ++counting;
 
-            double fee = -sol.negative_total_gas_fee;
+            double fee = -sol.negative_total_tx_fee;
 
             if (fee > best_fee) {
                 best_fee = fee;
@@ -544,6 +540,6 @@ int main(int argc, char* argv[]) {
     // cout << "aggregate p3->p4 time (ms): " << (total_p3_to_p4_ns / 1000.0) << endl;
     // cout << "aggregate generation time (ms): " << (total_generation_us / 1000.0) << endl;
 
-    cout << "fee: " << -best_solution.negative_total_gas_fee <<"\ngas used:" << best_solution.total_exec_time << endl;
+    cout << "fee: " << -best_solution.negative_total_tx_fee <<"\ngas used:" << best_solution.total_gas_units << endl;
     return 0;
 }
