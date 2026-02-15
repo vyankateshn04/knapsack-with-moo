@@ -17,7 +17,7 @@ struct Transaction {
 };
 
 struct Individual {
-    std::vector<char> included_transactions;
+    vector<char> included_transactions;
 
     double total_exec_time;
     double negative_total_gas_fee; // We minimize this to maximize the fee
@@ -31,7 +31,7 @@ struct Individual {
     double crowding_distance = 0.0;
 };
 
-void calculate_objectives(Individual& individual, const std::vector<Transaction>& all_transactions, double mx_exec_time) {
+void calculate_objectives(Individual& individual, const vector<Transaction>& all_transactions, double mx_exec_time) {
     individual.total_exec_time = 0.0;
     double total_gas_fee = 0.0;
     individual.constraint_violation = 0.0;
@@ -78,11 +78,11 @@ bool dominates(const Individual& ind1, const Individual& ind2) {
 
 // Performs the non-dominated sort on the population
 // Returns a vector of fronts, where each front is a vector of indices
-std::vector<std::vector<int>> non_dominated_sort(const std::vector<Individual>& population) {
+vector<vector<int>> non_dominated_sort(const vector<Individual>& population) {
     int n = population.size();
-    std::vector<std::vector<int>> fronts(1);
-    std::vector<int> domination_count(n, 0);
-    std::vector<std::vector<int>> dominated_solutions(n);
+    vector<vector<int>> fronts(1);
+    vector<int> domination_count(n, 0);
+    vector<vector<int>> dominated_solutions(n);
 
     for (int i = 0; i < n; ++i) {
         for (int j = i + 1; j < n; ++j) {
@@ -101,7 +101,7 @@ std::vector<std::vector<int>> non_dominated_sort(const std::vector<Individual>& 
 
     int current_front = 0;
     while (current_front < fronts.size()) {
-        std::vector<int> next_front;
+        vector<int> next_front;
         for (int i : fronts[current_front]) {
             for (int j : dominated_solutions[i]) {
                 domination_count[j]--;
@@ -120,7 +120,7 @@ std::vector<std::vector<int>> non_dominated_sort(const std::vector<Individual>& 
 
 
 // Calculates crowding distance for individuals within a single front
-void calculate_crowding_distance(std::vector<Individual>& front) {
+void calculate_crowding_distance(vector<Individual>& front) {
     if (front.empty()) return;
     int size = front.size();
     for (auto& ind : front) {
@@ -128,7 +128,7 @@ void calculate_crowding_distance(std::vector<Individual>& front) {
     }
 
     // Sort by first objective (exec_time)
-    std::sort(front.begin(), front.end(), [](const Individual& a, const Individual& b) {
+    sort(front.begin(), front.end(), [](const Individual& a, const Individual& b) {
         return a.total_exec_time < b.total_exec_time;
     });
 
@@ -142,7 +142,7 @@ void calculate_crowding_distance(std::vector<Individual>& front) {
     }
 
     // Sort by second objective (gas_fee)
-    std::sort(front.begin(), front.end(), [](const Individual& a, const Individual& b) {
+    sort(front.begin(), front.end(), [](const Individual& a, const Individual& b) {
         return a.negative_total_gas_fee < b.negative_total_gas_fee;
     });
 
@@ -158,14 +158,14 @@ void calculate_crowding_distance(std::vector<Individual>& front) {
 
 // Assign rank and crowding distance on the full population so tournament
 // selection can use up-to-date NSGA-II metadata.
-void assign_rank_and_crowding(std::vector<Individual>& population) {
+void assign_rank_and_crowding(vector<Individual>& population) {
     if (population.empty()) return;
 
     auto fronts = non_dominated_sort(population);
     const double kBoundaryDistance = 1e9;
 
     for (auto& ind : population) {
-        ind.rank = std::numeric_limits<int>::max();
+        ind.rank = numeric_limits<int>::max();
         ind.crowding_distance = 0.0;
     }
 
@@ -185,8 +185,8 @@ void assign_rank_and_crowding(std::vector<Individual>& population) {
             continue;
         }
 
-        std::vector<int> order = front;
-        std::sort(order.begin(), order.end(), [&](int a, int b) {
+        vector<int> order = front;
+        sort(order.begin(), order.end(), [&](int a, int b) {
             return population[a].total_exec_time < population[b].total_exec_time;
         });
 
@@ -207,7 +207,7 @@ void assign_rank_and_crowding(std::vector<Individual>& population) {
         }
 
         order = front;
-        std::sort(order.begin(), order.end(), [&](int a, int b) {
+        sort(order.begin(), order.end(), [&](int a, int b) {
             return population[a].negative_total_gas_fee < population[b].negative_total_gas_fee;
         });
 
@@ -230,8 +230,8 @@ void assign_rank_and_crowding(std::vector<Individual>& population) {
 }
 
 // Tournament Selection based on rank and crowding distance
-int selection(const std::vector<Individual>& population, std::mt19937_64& rng) {
-    std::uniform_int_distribution<int> pick_idx(0, static_cast<int>(population.size()) - 1);
+int selection(const vector<Individual>& population, mt19937_64& rng) {
+    uniform_int_distribution<int> pick_idx(0, static_cast<int>(population.size()) - 1);
     int i = pick_idx(rng);
     int j = pick_idx(rng);
     const Individual& ind1 = population[i];
@@ -244,26 +244,26 @@ int selection(const std::vector<Individual>& population, std::mt19937_64& rng) {
 }
 
 // Single-point crossover
-std::pair<Individual, Individual> crossover(
+pair<Individual, Individual> crossover(
     const Individual& p1,
     const Individual& p2,
     double crossover_rate,
-    std::mt19937_64& rng
+    mt19937_64& rng
 ) {
     Individual c1 = p1, c2 = p2;
-    std::bernoulli_distribution do_crossover(crossover_rate);
+    bernoulli_distribution do_crossover(crossover_rate);
     if (do_crossover(rng)) {
-        std::uniform_int_distribution<size_t> point_dist(0, p1.included_transactions.size() - 1);
+        uniform_int_distribution<size_t> point_dist(0, p1.included_transactions.size() - 1);
         size_t crossover_point = point_dist(rng);
         for (size_t i = crossover_point; i < p1.included_transactions.size(); ++i) {
-            std::swap(c1.included_transactions[i], c2.included_transactions[i]);
+            swap(c1.included_transactions[i], c2.included_transactions[i]);
         }
     }
     return {c1, c2};
 }
 
 // Bit-flip mutation
-void mutate(Individual& individual, double mutation_rate, std::mt19937_64& rng) {
+void mutate(Individual& individual, double mutation_rate, mt19937_64& rng) {
     const size_t n = individual.included_transactions.size();
     if (n == 0 || mutation_rate <= 0.0) return;
 
@@ -274,10 +274,10 @@ void mutate(Individual& individual, double mutation_rate, std::mt19937_64& rng) 
         return;
     }
 
-    static thread_local std::geometric_distribution<size_t> gap_dist;
+    static thread_local geometric_distribution<size_t> gap_dist;
     static thread_local double cached_rate = -1.0;
     if (cached_rate != mutation_rate) {
-        gap_dist.param(std::geometric_distribution<size_t>::param_type(mutation_rate));
+        gap_dist.param(geometric_distribution<size_t>::param_type(mutation_rate));
         cached_rate = mutation_rate;
     }
 
@@ -286,7 +286,7 @@ void mutate(Individual& individual, double mutation_rate, std::mt19937_64& rng) 
     while (idx < n) {
         individual.included_transactions[idx] = !individual.included_transactions[idx];
         size_t gap = gap_dist(rng);
-        if (idx > std::numeric_limits<size_t>::max() - 1 - gap) {
+        if (idx > numeric_limits<size_t>::max() - 1 - gap) {
             break;
         }
         idx += 1 + gap;
@@ -308,7 +308,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::mt19937_64 rng(42); // fixed seed for reproducibility
+    mt19937_64 rng(42); // fixed seed for reproducibility
 
     string filename = argv[1];
     double mx_exec_time = stod(argv[2]);
@@ -377,7 +377,7 @@ int main(int argc, char* argv[]) {
 
     for (auto& ind : population) {
         ind.included_transactions.resize(total_transactions);
-        std::bernoulli_distribution init_pick(15.0 / 1000.0);
+        bernoulli_distribution init_pick(15.0 / 1000.0);
 
         for (int i = 0; i < total_transactions; ++i) {
             ind.included_transactions[i] = init_pick(rng);
