@@ -81,45 +81,161 @@ bool dominates(const Individual& ind1, const Individual& ind2) {
     return better_in_one && not_worse_in_any;
 }
 
+namespace {
+struct FenwickMax {
+    explicit FenwickMax(int n) : bit(static_cast<size_t>(n) + 1, -1) {}
+
+    void update(int idx, int value) {
+        for (int i = idx + 1; i < static_cast<int>(bit.size()); i += i & -i) {
+            bit[i] = max(bit[i], value);
+        }
+    }
+
+    int query(int idx) const {
+        int best = -1;
+        for (int i = idx + 1; i > 0; i -= i & -i) {
+            best = max(best, bit[i]);
+        }
+        return best;
+    }
+
+    vector<int> bit;
+};
+
+struct FeasiblePoint {
+    int idx;
+    double total_gas_units;
+    double negative_total_tx_fee;
+    int y_rank = 0;
+};
+} // namespace
+
 // Performs the non-dominated sort on the population
 // Returns a vector of fronts, where each front is a vector of indices
 vector<vector<int>> non_dominated_sort(const vector<Individual>& population) {
-    int n = population.size();
-    vector<vector<int>> fronts(1);
-    vector<int> domination_count(n, 0);
-    vector<vector<int>> dominated_solutions(n);
+    vector<vector<int>> fronts;
+    if (population.empty()) {
+        return fronts;
+    }
 
-    for (int i = 0; i < n; ++i) {
-        for (int j = i + 1; j < n; ++j) {
-            if (dominates(population[i], population[j])) {
-                dominated_solutions[i].push_back(j);
-                domination_count[j]++;
-            } else if (dominates(population[j], population[i])) {
-                dominated_solutions[j].push_back(i);
-                domination_count[i]++;
-            }
-        }
-        if (domination_count[i] == 0) {
-            fronts[0].push_back(i);
+    vector<int> feasible_idx;
+    vector<int> infeasible_idx;
+    feasible_idx.reserve(population.size());
+    infeasible_idx.reserve(population.size());
+
+    for (int i = 0; i < static_cast<int>(population.size()); ++i) {
+        if (population[i].constraint_violation == 0.0) {
+            feasible_idx.push_back(i);
+        } else {
+            infeasible_idx.push_back(i);
         }
     }
 
-    int current_front = 0;
-    while (current_front < fronts.size()) {
-        vector<int> next_front;
-        for (int i : fronts[current_front]) {
-            for (int j : dominated_solutions[i]) {
-                domination_count[j]--;
-                if (domination_count[j] == 0) {
-                    next_front.push_back(j);
+    if (!feasible_idx.empty()) {
+        vector<FeasiblePoint> feasible_points;
+        feasible_points.reserve(feasible_idx.size());
+
+        vector<double> y_values;
+        y_values.reserve(feasible_idx.size());
+
+        for (int idx : feasible_idx) {
+            feasible_points.push_back({
+                idx,
+                population[idx].total_gas_units,
+                population[idx].negative_total_tx_fee,
+                0
+            });
+            y_values.push_back(population[idx].negative_total_tx_fee);
+        }
+
+        sort(y_values.begin(), y_values.end());
+        y_values.erase(unique(y_values.begin(), y_values.end()), y_values.end());
+
+        for (auto& point : feasible_points) {
+            point.y_rank = static_cast<int>(lower_bound(
+                y_values.begin(),
+                y_values.end(),
+                point.negative_total_tx_fee
+            ) - y_values.begin());
+        }
+
+        sort(feasible_points.begin(), feasible_points.end(),
+            [](const FeasiblePoint& a, const FeasiblePoint& b) {
+                if (a.total_gas_units != b.total_gas_units) {
+                    return a.total_gas_units < b.total_gas_units;
                 }
+                if (a.negative_total_tx_fee != b.negative_total_tx_fee) {
+                    return a.negative_total_tx_fee < b.negative_total_tx_fee;
+                }
+                return a.idx < b.idx;
+            });
+
+        FenwickMax fenwick(static_cast<int>(y_values.size()));
+        int max_rank = -1;
+
+        size_t x_begin = 0;
+        while (x_begin < feasible_points.size()) {
+            size_t x_end = x_begin + 1;
+            while (x_end < feasible_points.size() &&
+                   feasible_points[x_end].total_gas_units == feasible_points[x_begin].total_gas_units) {
+                ++x_end;
             }
-        }
-        current_front++;
-        if (!next_front.empty()) {
-            fronts.push_back(next_front);
+
+            size_t y_begin = x_begin;
+            while (y_begin < x_end) {
+                size_t y_end = y_begin + 1;
+                while (y_end < x_end &&
+                       feasible_points[y_end].negative_total_tx_fee == feasible_points[y_begin].negative_total_tx_fee) {
+                    ++y_end;
+                }
+
+                int y_rank = feasible_points[y_begin].y_rank;
+                int front_rank = fenwick.query(y_rank) + 1;
+                if (front_rank > max_rank) {
+                    fronts.resize(static_cast<size_t>(front_rank) + 1);
+                    max_rank = front_rank;
+                }
+
+                for (size_t i = y_begin; i < y_end; ++i) {
+                    fronts[front_rank].push_back(feasible_points[i].idx);
+                }
+
+                fenwick.update(y_rank, front_rank);
+                y_begin = y_end;
+            }
+
+            x_begin = x_end;
         }
     }
+
+    if (!infeasible_idx.empty()) {
+        sort(infeasible_idx.begin(), infeasible_idx.end(),
+            [&](int a, int b) {
+                if (population[a].constraint_violation != population[b].constraint_violation) {
+                    return population[a].constraint_violation < population[b].constraint_violation;
+                }
+                return a < b;
+            });
+
+        size_t begin = 0;
+        while (begin < infeasible_idx.size()) {
+            size_t end = begin + 1;
+            const double violation = population[infeasible_idx[begin]].constraint_violation;
+            while (end < infeasible_idx.size() &&
+                   population[infeasible_idx[end]].constraint_violation == violation) {
+                ++end;
+            }
+
+            fronts.emplace_back();
+            auto& front = fronts.back();
+            front.reserve(end - begin);
+            for (size_t i = begin; i < end; ++i) {
+                front.push_back(infeasible_idx[i]);
+            }
+            begin = end;
+        }
+    }
+
     return fronts;
 }
 
